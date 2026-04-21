@@ -33,6 +33,7 @@ PACKAGES=(
   flameshot
   neovim
   devilspie2
+  jq
 )
 
 ########################################
@@ -40,33 +41,48 @@ PACKAGES=(
 ########################################
 
 install_nala() {
+  echo
+  echo
   echo "==> Installing nala..."
   sudo apt update -y
   sudo apt install -y nala
 }
 
 install_basic_tools() {
+  echo
+  echo
   echo "==> Installing basic tools..."
   sudo nala update
   sudo nala install -y "${BASIC_TOOLS[@]}"
 }
 
 setup_vscode_repo() {
-  if [ ! -f /etc/apt/sources.list.d/vscode.list ]; then
-    echo "==> Setting up VS Code repo..."
+  echo "==> Setting up VS Code repo (idempotent safe mode)..."
 
-    sudo mkdir -p /etc/apt/keyrings
+  # Remove all possible conflicting definitions
+  sudo rm -f /etc/apt/sources.list.d/vscode.list
+  sudo rm -f /etc/apt/sources.list.d/vscode.sources
 
-    wget -qO- https://packages.microsoft.com/keys/microsoft.asc \
-      | gpg --dearmor | sudo tee /etc/apt/keyrings/microsoft.gpg > /dev/null
+  # Remove old keys (avoid mismatch conflicts)
+  sudo rm -f /usr/share/keyrings/microsoft.gpg
+  sudo rm -f /etc/apt/keyrings/microsoft.gpg
 
-    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/code stable main" \
-      | sudo tee /etc/apt/sources.list.d/vscode.list > /dev/null
-  fi
+  # Recreate clean key
+  sudo mkdir -p /etc/apt/keyrings
+
+  wget -qO- https://packages.microsoft.com/keys/microsoft.asc \
+    | gpg --dearmor \
+    | sudo tee /etc/apt/keyrings/microsoft.gpg > /dev/null
+
+  # Recreate repo (single format only)
+  echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/code stable main" \
+    | sudo tee /etc/apt/sources.list.d/vscode.list > /dev/null
 }
 
 setup_chrome_repo() {
   if [ ! -f /etc/apt/sources.list.d/google-chrome.list ]; then
+    echo
+    echo
     echo "==> Setting up Google Chrome repo..."
 
     sudo mkdir -p /etc/apt/keyrings
@@ -80,12 +96,16 @@ setup_chrome_repo() {
 }
 
 install_packages() {
+  echo
+  echo
   echo "==> Installing packages..."
   sudo nala update
   sudo nala install -y "${PACKAGES[@]}"
 }
 
 remove_libreoffice() {
+  echo
+  echo
   echo "==> Removing LibreOffice..."
   sudo apt purge -y 'libreoffice*' || true
   sudo apt autoremove -y
@@ -96,6 +116,8 @@ remove_libreoffice() {
 ########################################
 
 setup_terminator() {
+  echo
+  echo
   echo "==> Configuring Terminator..."
 
   mkdir -p "$TERMINATOR_CONFIG_DIR"
@@ -144,6 +166,8 @@ EOF
 
 
 setup_terminal_shortcut() {
+  echo
+  echo
   echo "==> Fixing terminal shortcut (Super+T)..."
 
   local BASE_PATH="/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings"
@@ -167,6 +191,8 @@ setup_terminal_shortcut() {
 }
 
 setup_devilspie2() {
+  echo
+  echo
   echo "==> Configuring devilspie2..."
 
   local CONF_DIR="$USER_HOME/.config/devilspie2"
@@ -193,6 +219,8 @@ EOF
 }
 
 setup_linutil() {
+  echo
+  echo
   echo "==> Configuring Linutil..."
 
   cat << 'EOF' > "$LINUTIL_CONFIG"
@@ -205,13 +233,97 @@ skip_confirmation = true
 size_bypass = true
 EOF
 
-  curl -fsSL https://christitus.com/linux | sh -s -- -c "$LINUTIL_CONFIG" -y
+  curl -fsSL https://christitus.com/linux | sudo sh -s -- -c "$LINUTIL_CONFIG" -y -s
 }
 
 upgrade_pkgs() {
+  echo
+  echo
   echo "==> Upgrading packages..."
-  sudo nala upgrade -y
+  sudo nala full-upgrade -y
 }
+
+setup_browser_shortcut() {
+  echo
+  echo
+  echo "==> Setting browser shortcut (Super+B)..."
+
+  local BASE_PATH="/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings"
+  local KEY_PATH="$BASE_PATH/custom1/"
+
+  current=$(gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings)
+
+  # remove @as [] formatting safely
+  if [[ "$current" == "@as []" ]]; then
+    new_list="['$KEY_PATH']"
+  else
+    # safer append using Python (avoids sed issues completely)
+    new_list=$(python3 - <<EOF
+import ast
+current = ast.literal_eval("""$current""")
+key = "$KEY_PATH"
+if key not in current:
+    current.append(key)
+print(current)
+EOF
+)
+  fi
+
+  gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "$new_list"
+
+  gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:$KEY_PATH name 'Browser'
+  gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:$KEY_PATH command 'google-chrome'
+  gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:$KEY_PATH binding '<Super>b'
+}
+
+setup_gnome() {
+  echo
+  echo
+  echo "==> Configuring GNOME (theme + UI behavior)..."
+
+  # Dark mode
+  gsettings set org.gnome.desktop.interface color-scheme 'prefer-dark'
+
+  # GTK theme
+  gsettings set org.gnome.desktop.interface gtk-theme 'Adwaita-dark'
+
+  # Icon theme (correct choice)
+  gsettings set org.gnome.desktop.interface icon-theme 'Yaru-blue-dark'
+
+  # Window buttons (only close)
+  gsettings set org.gnome.desktop.wm.preferences button-layout ':close'
+
+  # Enable antialiasing
+  gsettings set org.gnome.desktop.interface font-antialiasing 'rgba'
+
+  # Hinting (improves sharpness on low-DPI displays)
+  gsettings set org.gnome.desktop.interface font-hinting 'slight'
+
+  # Subpixel order (most common: RGB)
+  gsettings set org.gnome.desktop.interface font-rgba-order 'rgb'
+}
+
+setup_startup_apps() {
+  echo
+  echo
+  echo "==> Setting up GNOME startup applications..."
+
+  local AUTOSTART_DIR="$USER_HOME/.config/autostart"
+  mkdir -p "$AUTOSTART_DIR"
+
+  # Flameshot (if you want it at login)
+  cat << 'EOF' > "$AUTOSTART_DIR/flameshot.desktop"
+[Desktop Entry]
+Type=Application
+Exec=flameshot
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+Name=Flameshot
+Comment=Screenshot tool
+EOF
+}
+
 
 ########################################
 # MAIN
@@ -228,14 +340,15 @@ main() {
   setup_terminator
   setup_terminal_shortcut
   setup_devilspie2
-
+  
+  setup_browser_shortcut
+  setup_gnome
   upgrade_pkgs
 
   setup_linutil
 
   echo
   echo "==> Setup complete!"
-  echo "👉 Re-login recommended."
 }
 
 main
