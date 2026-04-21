@@ -34,6 +34,7 @@ PACKAGES=(
   code
   trash-cli
   flameshot
+  neovim
 )
 
 ########################################
