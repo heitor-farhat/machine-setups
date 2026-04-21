@@ -8,8 +8,6 @@ set -e
 
 USER_HOME="$HOME"
 BIN_DIR="$USER_HOME/bin"
-WRAPPER="$BIN_DIR/terminator-max"
-SYSTEM_WRAPPER="/usr/local/bin/terminator-max"
 
 TERMINATOR_CONFIG_DIR="$USER_HOME/.config/terminator"
 TERMINATOR_CONFIG_FILE="$TERMINATOR_CONFIG_DIR/config"
@@ -29,12 +27,12 @@ PACKAGES=(
   git
   zoxide
   fzf
-  wmctrl
   google-chrome-stable
   code
   trash-cli
   flameshot
   neovim
+  devilspie2
 )
 
 ########################################
@@ -93,28 +91,12 @@ remove_libreoffice() {
   sudo apt autoremove -y
 }
 
+########################################
+# TERMINATOR (clean, no wrapper, no wmctrl)
+########################################
+
 setup_terminator() {
   echo "==> Configuring Terminator..."
-
-  mkdir -p "$BIN_DIR"
-
-  cat << 'EOF' > "$WRAPPER"
-#!/usr/bin/env bash
-terminator -e "bash -c 'wmctrl -r :ACTIVE: -b add,maximized_vert,maximized_horz; exec bash'"
-EOF
-
-  chmod +x "$WRAPPER"
-
-  # Make wrapper global
-  sudo ln -sf "$WRAPPER" "$SYSTEM_WRAPPER"
-
-  # Register + force as default terminal
-  sudo update-alternatives --install /usr/bin/x-terminal-emulator x-terminal-emulator "$SYSTEM_WRAPPER" 100
-  sudo update-alternatives --set x-terminal-emulator "$SYSTEM_WRAPPER"
-
-  # Optional (won’t hurt, sometimes helps)
-  gsettings set org.gnome.desktop.default-applications.terminal exec "$SYSTEM_WRAPPER" || true
-  gsettings set org.gnome.desktop.default-applications.terminal exec-arg '-x' || true
 
   mkdir -p "$TERMINATOR_CONFIG_DIR"
 
@@ -132,17 +114,6 @@ background_type = transparent
 font = MesloLGS Nerd Font Mono Italic 10
 foreground_color = "#ffffff"
 scrollback_infinite = True
-use_system_font = False
-title_transmit_bg_color = "#044a72"
-
-[[PaulMillr]]
-background_darkness = 0.9
-background_type = transparent
-cursor_bg_color = "#4d4d4d"
-font = MesloLGS Nerd Font Mono Italic 10
-foreground_color = "#f2f2f2"
-scrollback_infinite = True
-palette = "#2a2a2a:#ff0000:#79ff0f:#e7bf00:#396bd7:#b449be:#66ccff:#bbbbbb:#666666:#ff0080:#66ff66:#f3d64e:#709aed:#db67e6:#7adff2:#ffffff"
 use_system_font = False
 title_transmit_bg_color = "#044a72"
 
@@ -171,6 +142,56 @@ profile = VibrantInk
 EOF
 }
 
+
+setup_terminal_shortcut() {
+  echo "==> Fixing terminal shortcut (Super+T)..."
+
+  local BASE_PATH="/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings"
+  local KEY_PATH="$BASE_PATH/custom0/"
+
+  current=$(gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings)
+
+  if [[ "$current" == "@as []" ]]; then
+    new_list="['$KEY_PATH']"
+  elif [[ "$current" != *"$KEY_PATH"* ]]; then
+    new_list=$(echo "$current" | sed "s/]$/, '$KEY_PATH']/")
+  else
+    new_list="$current"
+  fi
+
+  gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "$new_list"
+
+  gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:$KEY_PATH name 'Terminal'
+  gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:$KEY_PATH command 'terminator'
+  gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:$KEY_PATH binding '<Super>t'
+}
+
+setup_devilspie2() {
+  echo "==> Configuring devilspie2..."
+
+  local CONF_DIR="$USER_HOME/.config/devilspie2"
+
+  mkdir -p "$CONF_DIR"
+
+  cat << 'EOF' > "$CONF_DIR/terminator.lua"
+if string.find(get_application_name():lower(), "terminator") then
+  maximize()
+end
+EOF
+
+  mkdir -p "$USER_HOME/.config/autostart"
+
+  cat << 'EOF' > "$USER_HOME/.config/autostart/devilspie2.desktop"
+[Desktop Entry]
+Type=Application
+Exec=devilspie2
+Hidden=false
+NoDisplay=false
+X-GNOME-Autostart-enabled=true
+Name=Devilspie2
+EOF
+}
+
 setup_linutil() {
   echo "==> Configuring Linutil..."
 
@@ -192,29 +213,6 @@ upgrade_pkgs() {
   sudo nala upgrade -y
 }
 
-setup_terminal_shortcut() {
-  echo "==> Fixing terminal shortcut (Super+T)..."
-
-  local BASE_PATH="/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings"
-  local KEY_PATH="$t/custom0/"
-
-  current=$(gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings)
-
-  if [[ "$current" == "@as []" ]]; then
-    new_list="['$KEY_PATH']"
-  elif [[ "$current" != *"$KEY_PATH"* ]]; then
-    new_list=$(echo "$current" | sed "s/]$/, '$KEY_PATH']/")
-  else
-    new_list="$current"
-  fi
-
-  gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "$new_list"
-
-  gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:$KEY_PATH name 'Terminal'
-  gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:$KEY_PATH command 'x-terminal-emulator'
-  gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:$KEY_PATH binding '<Super>t'
-}
-
 ########################################
 # MAIN
 ########################################
@@ -226,10 +224,13 @@ main() {
   setup_chrome_repo
   install_packages
   remove_libreoffice
+
   setup_terminator
   setup_terminal_shortcut
+  setup_devilspie2
 
-  # Keep last (interactive)
+  upgrade_pkgs
+
   setup_linutil
 
   echo
