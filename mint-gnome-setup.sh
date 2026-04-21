@@ -3,104 +3,121 @@
 set -e
 
 ########################################
-
 # VARIABLES
-
 ########################################
 
 USER_HOME="$HOME"
 BIN_DIR="$USER_HOME/bin"
 WRAPPER="$BIN_DIR/terminator-max"
+SYSTEM_WRAPPER="/usr/local/bin/terminator-max"
+
 TERMINATOR_CONFIG_DIR="$USER_HOME/.config/terminator"
 TERMINATOR_CONFIG_FILE="$TERMINATOR_CONFIG_DIR/config"
+
 LINUTIL_CONFIG="$USER_HOME/linutil-config.toml"
 
-BASIC_TOOLS=(
-  gpg
-  wget
-)
+BASIC_TOOLS=(gpg wget)
 
 PACKAGES=(
-gnome-session
-gnome-control-center
-gnome-tweaks
-gnome-startup-applications
-gnome-shell-extensions
-nautilus
-terminator
-git
-zoxide
-fzf
-wmctrl
-google-chrome-stable
-code
-trash-cli
-flameshot
+  gnome-session
+  gnome-control-center
+  gnome-tweaks
+  gnome-startup-applications
+  gnome-shell-extensions
+  nautilus
+  terminator
+  git
+  zoxide
+  fzf
+  wmctrl
+  google-chrome-stable
+  code
+  trash-cli
+  flameshot
 )
 
 ########################################
-
 # FUNCTIONS
-
 ########################################
 
 install_nala() {
-echo
-echo
-echo "==> apt update..."
-sudo apt update -y
-
-echo
-echo
-echo "==> Installing nala..."
-sudo apt install -y nala
+  echo "==> Installing nala..."
+  sudo apt update -y
+  sudo apt install -y nala
 }
 
 install_basic_tools() {
-  echo
-  echo
-  echo "==> Installing basic tools with nala..."
+  echo "==> Installing basic tools..."
   sudo nala update
   sudo nala install -y "${BASIC_TOOLS[@]}"
 }
 
+setup_vscode_repo() {
+  if [ ! -f /etc/apt/sources.list.d/vscode.list ]; then
+    echo "==> Setting up VS Code repo..."
+
+    sudo mkdir -p /etc/apt/keyrings
+
+    wget -qO- https://packages.microsoft.com/keys/microsoft.asc \
+      | gpg --dearmor | sudo tee /etc/apt/keyrings/microsoft.gpg > /dev/null
+
+    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/code stable main" \
+      | sudo tee /etc/apt/sources.list.d/vscode.list > /dev/null
+  fi
+}
+
+setup_chrome_repo() {
+  if [ ! -f /etc/apt/sources.list.d/google-chrome.list ]; then
+    echo "==> Setting up Google Chrome repo..."
+
+    sudo mkdir -p /etc/apt/keyrings
+
+    wget -qO- https://dl.google.com/linux/linux_signing_key.pub \
+      | gpg --dearmor | sudo tee /etc/apt/keyrings/google.gpg > /dev/null
+
+    echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
+      | sudo tee /etc/apt/sources.list.d/google-chrome.list > /dev/null
+  fi
+}
+
 install_packages() {
-  echo
-  echo
-  echo "==> Installing packages with nala..."
+  echo "==> Installing packages..."
   sudo nala update
   sudo nala install -y "${PACKAGES[@]}"
 }
 
 remove_libreoffice() {
-  echo
-  echo
   echo "==> Removing LibreOffice..."
-  sudo apt purge -y libreoffice*
+  sudo apt purge -y 'libreoffice*' || true
   sudo apt autoremove -y
 }
 
 setup_terminator() {
-echo
-echo
-echo "==> Setup Terminator"
-mkdir -p "$BIN_DIR"
-cat << 'EOF' > "$WRAPPER"
+  echo "==> Configuring Terminator..."
+
+  mkdir -p "$BIN_DIR"
+
+  cat << 'EOF' > "$WRAPPER"
 #!/usr/bin/env bash
 terminator -e "bash -c 'wmctrl -r :ACTIVE: -b add,maximized_vert,maximized_horz; exec bash'"
 EOF
 
-chmod +x "$WRAPPER"
+  chmod +x "$WRAPPER"
 
-sudo update-alternatives --install /usr/bin/x-terminal-emulator x-terminal-emulator "$WRAPPER" 100
-sudo update-alternatives --set x-terminal-emulator "$WRAPPER"
+  # Make wrapper global
+  sudo ln -sf "$WRAPPER" "$SYSTEM_WRAPPER"
 
-gsettings set org.gnome.desktop.default-applications.terminal exec "$WRAPPER"
-gsettings set org.gnome.desktop.default-applications.terminal exec-arg '-x'
+  # Register + force as default terminal
+  sudo update-alternatives --install /usr/bin/x-terminal-emulator x-terminal-emulator "$SYSTEM_WRAPPER" 100
+  sudo update-alternatives --set x-terminal-emulator "$SYSTEM_WRAPPER"
 
-mkdir -p "$TERMINATOR_CONFIG_DIR"
+  # Optional (won’t hurt, sometimes helps)
+  gsettings set org.gnome.desktop.default-applications.terminal exec "$SYSTEM_WRAPPER" || true
+  gsettings set org.gnome.desktop.default-applications.terminal exec-arg '-x' || true
 
-cat << 'EOF' > "$TERMINATOR_CONFIG_FILE"
+  mkdir -p "$TERMINATOR_CONFIG_DIR"
+
+  cat << 'EOF' > "$TERMINATOR_CONFIG_FILE"
 [global_config]
 window_state = maximise
 enabled_plugins = LaunchpadBugURLHandler, LaunchpadCodeURLHandler, APTURLHandler, TerminatorThemes
@@ -154,11 +171,9 @@ EOF
 }
 
 setup_linutil() {
-echo
-echo
-echo "==> Creating Linutil config..."
+  echo "==> Configuring Linutil..."
 
-cat << 'EOF' > "$LINUTIL_CONFIG"
+  cat << 'EOF' > "$LINUTIL_CONFIG"
 auto_execute = [
 "Bash Prompt",
 "FastFetch"
@@ -168,69 +183,57 @@ skip_confirmation = true
 size_bypass = true
 EOF
 
-echo
-echo
-echo "==> Running Linutil..."
-curl -fsSL https://christitus.com/linux | sh -s -- -c "$LINUTIL_CONFIG" -y
-}
-
-install_vscode() {
-  echo
-  echo
-  echo "==> Installing VS Code key..."
-
-  wget -qO- https://packages.microsoft.com/keys/microsoft.asc \
-    | gpg --dearmor > /tmp/microsoft.gpg
-
-  sudo install -o root -g root -m 644 /tmp/microsoft.gpg /etc/apt/keyrings/
-
-  echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/microsoft.gpg] https://packages.microsoft.com/repos/code stable main" \
-    | sudo tee /etc/apt/sources.list.d/vscode.list
-}
-
-install_chrome() {
-  echo
-  echo
-  echo "==> Installing Google Chrome key..."
-
-  wget -qO- https://dl.google.com/linux/linux_signing_key.pub \
-    | gpg --dearmor > /tmp/google.gpg
-
-  sudo install -o root -g root -m 644 /tmp/google.gpg /etc/apt/keyrings/
-
-  echo "deb [arch=amd64 signed-by=/etc/apt/keyrings/google.gpg] http://dl.google.com/linux/chrome/deb/ stable main" \
-    | sudo tee /etc/apt/sources.list.d/google-chrome.list
+  curl -fsSL https://christitus.com/linux | sh -s -- -c "$LINUTIL_CONFIG" -y
 }
 
 upgrade_pkgs() {
-  echo
-  echo
   echo "==> Upgrading packages..."
   sudo nala upgrade -y
 }
 
+setup_terminal_shortcut() {
+  echo "==> Fixing terminal shortcut (Super+T)..."
+
+  local BASE_PATH="/org/gnome/settings-daemon/plugins/media-keys/custom-keybindings"
+  local KEY_PATH="$t/custom0/"
+
+  current=$(gsettings get org.gnome.settings-daemon.plugins.media-keys custom-keybindings)
+
+  if [[ "$current" == "@as []" ]]; then
+    new_list="['$KEY_PATH']"
+  elif [[ "$current" != *"$KEY_PATH"* ]]; then
+    new_list=$(echo "$current" | sed "s/]$/, '$KEY_PATH']/")
+  else
+    new_list="$current"
+  fi
+
+  gsettings set org.gnome.settings-daemon.plugins.media-keys custom-keybindings "$new_list"
+
+  gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:$KEY_PATH name 'Terminal'
+  gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:$KEY_PATH command 'x-terminal-emulator'
+  gsettings set org.gnome.settings-daemon.plugins.media-keys.custom-keybinding:$KEY_PATH binding '<Super>t'
+}
+
 ########################################
-
 # MAIN
-
 ########################################
 
 main() {
-install_nala
-install_basic_tools
-install_vscode
-install_chrome
-install_packages
-remove_libreoffice
-setup_terminator
+  install_nala
+  install_basic_tools
+  setup_vscode_repo
+  setup_chrome_repo
+  install_packages
+  remove_libreoffice
+  setup_terminator
+  setup_terminal_shortcut
 
-# Last due to interactive UI
-setup_linutil
+  # Keep last (interactive)
+  setup_linutil
 
-echo
-echo
-echo "==> Setup complete!"
+  echo
+  echo "==> Setup complete!"
+  echo "👉 Re-login recommended."
 }
 
 main
-
